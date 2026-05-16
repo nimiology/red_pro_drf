@@ -42,12 +42,11 @@ class Mission(models.Model):
     )
     
     # Scheduling
-    scheduled_date = models.DateField()
-    scheduled_time = models.TimeField()
+    scheduled_date = models.DateTimeField()
     
     status = models.CharField(
         max_length=20, 
-        choices=Status.choices, 
+        choices=Status.choices,
         default=Status.PENDING
     )
     
@@ -56,6 +55,3 @@ class Mission(models.Model):
 
     def __str__(self):
         return f"{self.title} - {self.scheduled_date}"
-
-    class Meta:
-        ordering = ['-scheduled_date', '-scheduled_time']

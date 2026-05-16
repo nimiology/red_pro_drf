@@ -15,6 +15,15 @@ from apps.squads.models import Squad
 class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ActivitySerializer
     permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = {
+        'type': ['exact', 'in'],
+        'sport_type': ['exact', 'in'],
+        'start_date': ['exact', 'gt', 'lt', 'gte', 'lte'],
+        'athlete': ['exact'],
+        'distance': ['exact', 'gt', 'lt'],
+    }
+    ordering_fields = '__all__'
+    ordering = ['-start_date']
 
     def get_queryset(self):
         # Athletes see their own activities, Coaches see their squad activities

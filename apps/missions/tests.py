@@ -2,81 +2,138 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from apps.accounts.models import User
+from apps.squads.models import Squad
 from .models import Mission
 
-class MissionMatrixTests(APITestCase):
+class MissionMatrixSmashTests(APITestCase):
     """
-    Matrix Smash Tests for Mission CRUD and permissions.
+    Comprehensive Matrix Smash Tests for Mission API.
+    Tests all methods against all roles and validates data isolation.
     """
     def setUp(self):
-        self.coach = User.objects.create_user(username='coach1', password='password', role='COACH')
-        self.athlete = User.objects.create_user(username='athlete1', password='password', role='ATHLETE')
-        self.other_athlete = User.objects.create_user(username='athlete2', password='password', role='ATHLETE')
+        # Users
+        self.coach = User.objects.create_user(username='coach', password='password', role='COACH')
+        self.other_coach = User.objects.create_user(username='other_coach', password='password', role='COACH')
+        self.athlete = User.objects.create_user(username='athlete', password='password', role='ATHLETE')
+        self.stranger = User.objects.create_user(username='stranger', password='password', role='ATHLETE')
         
-        self.mission_url = reverse('mission-list')
+        # Squad
+        self.squad = Squad.objects.create(name="Alpha Squad", coach=self.coach)
+        self.squad.athletes.add(self.athlete)
+        
+        # Missions
+        self.mission_direct = Mission.objects.create(
+            coach=self.coach, athlete=self.athlete, title="Direct Mission", 
+            pace="4:00", distance=5, hr_zone=3, scheduled_date="2024-05-20T08:00:00Z"
+        )
+        self.mission_squad = Mission.objects.create(
+            coach=self.coach, squad=self.squad, title="Squad Mission", 
+            pace="4:30", distance=10, hr_zone=2, scheduled_date="2024-05-21T08:00:00Z"
+        )
+        self.mission_other = Mission.objects.create(
+            coach=self.other_coach, title="Other Coach Mission", 
+            pace="5:00", distance=15, hr_zone=1, scheduled_date="2024-05-22T08:00:00Z"
+        )
 
-    def test_coach_can_create_mission(self):
+        self.list_url = reverse('mission-list')
+        self.detail_url = lambda pk: reverse('mission-detail', kwargs={'pk': pk})
+
+    def test_get_matrix(self):
+        matrix = [
+            (self.coach, self.mission_direct, 200),
+            (self.athlete, self.mission_direct, 200),
+            (self.athlete, self.mission_squad, 200),
+            (self.stranger, self.mission_direct, 404),
+            (self.other_coach, self.mission_direct, 404),
+        ]
+        for user, mission, status_code in matrix:
+            self.client.force_authenticate(user=user)
+            resp = self.client.get(self.detail_url(mission.pk))
+            self.assertEqual(resp.status_code, status_code, f"User {user.username} GET {mission.title} failed")
+
+    def test_patch_matrix(self):
+        matrix = [
+            (self.coach, self.mission_direct, 200),
+            (self.athlete, self.mission_direct, 403),
+            (self.stranger, self.mission_direct, 403), # 403 due to IsCoachOrReadOnly
+        ]
+        for user, mission, status_code in matrix:
+            self.client.force_authenticate(user=user)
+            resp = self.client.patch(self.detail_url(mission.pk), {"title": "Edited"})
+            self.assertEqual(resp.status_code, status_code, f"User {user.username} PATCH {mission.title} failed")
+
+    def test_delete_matrix(self):
+        matrix = [
+            (self.athlete, self.mission_direct, 403),
+            (self.stranger, self.mission_direct, 403), # 403 due to IsCoachOrReadOnly
+            (self.coach, self.mission_direct, 204),
+        ]
+        for user, mission, status_code in matrix:
+            self.client.force_authenticate(user=user)
+            resp = self.client.delete(self.detail_url(mission.pk))
+            self.assertEqual(resp.status_code, status_code, f"User {user.username} DELETE {mission.title} failed")
+
+    def test_create_permission_matrix(self):
+        users = [
+            (self.coach, 201),
+            (self.athlete, 403),
+            (self.stranger, 403),
+        ]
+        
+        for user, expected_status in users:
+            self.client.force_authenticate(user=user)
+            data = {
+                "title": f"New Mission by {user.username}",
+                "pace": "4:00",
+                "distance": 5.0,
+                "hr_zone": 3,
+                "scheduled_date": "2024-05-20T08:00:00Z"
+            }
+            resp = self.client.post(self.list_url, data)
+            self.assertEqual(resp.status_code, expected_status)
+            
+            if expected_status == 201:
+                # Test perform_create: coach should be set to the user
+                self.assertEqual(resp.data['coach'], user.id)
+
+    def test_queryset_isolation_and_squad_visibility(self):
+        """
+        Tests that get_queryset correctly filters missions.
+        """
+        # 1. Coach should see only their 2 missions (direct and squad)
+        self.client.force_authenticate(user=self.coach)
+        resp = self.client.get(self.list_url)
+        self.assertEqual(len(resp.data), 2)
+        
+        # 2. Athlete should see 2 missions (one direct, one via squad)
+        self.client.force_authenticate(user=self.athlete)
+        resp = self.client.get(self.list_url)
+        self.assertEqual(len(resp.data), 2)
+        
+        # 3. Stranger should see 0 missions
+        self.client.force_authenticate(user=self.stranger)
+        resp = self.client.get(self.list_url)
+        self.assertEqual(len(resp.data), 0)
+        
+        # 4. Other coach should see 1 mission
+        self.client.force_authenticate(user=self.other_coach)
+        resp = self.client.get(self.list_url)
+        self.assertEqual(len(resp.data), 1)
+
+    def test_perform_create_coach_assignment(self):
+        """
+        Verify that the coach is automatically set to the current user on create.
+        """
         self.client.force_authenticate(user=self.coach)
         data = {
-            "title": "Threshold Run",
-            "pace": "4:00 /KM",
-            "distance": 10.0,
-            "hr_zone": 4,
-            "scheduled_date": "2024-05-20",
-            "scheduled_time": "08:00:00",
-            "athlete": self.athlete.id
-        }
-        response = self.client.post(self.mission_url, data)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Mission.objects.count(), 1)
-        self.assertEqual(Mission.objects.first().coach, self.coach)
-
-    def test_athlete_cannot_create_mission(self):
-        self.client.force_authenticate(user=self.athlete)
-        data = {
-            "title": "Illegal Mission",
+            "title": "Auto Coach Test",
             "pace": "4:00",
             "distance": 5.0,
             "hr_zone": 3,
-            "scheduled_date": "2024-05-20",
-            "scheduled_time": "08:00:00"
+            "scheduled_date": "2024-05-20T08:00:00Z"
         }
-        response = self.client.post(self.mission_url, data)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-    def test_athlete_cannot_update_mission(self):
-        mission = Mission.objects.create(
-            coach=self.coach, athlete=self.athlete, title="M1", 
-            pace="4:00", distance=5, hr_zone=3, scheduled_date="2024-01-01", scheduled_time="00:00"
-        )
-        self.client.force_authenticate(user=self.athlete)
-        url = reverse('mission-detail', kwargs={'pk': mission.pk})
-        response = self.client.patch(url, {"title": "Changed"})
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-    def test_athlete_cannot_delete_mission(self):
-        mission = Mission.objects.create(
-            coach=self.coach, athlete=self.athlete, title="M1", 
-            pace="4:00", distance=5, hr_zone=3, scheduled_date="2024-01-01", scheduled_time="00:00"
-        )
-        self.client.force_authenticate(user=self.athlete)
-        url = reverse('mission-detail', kwargs={'pk': mission.pk})
-        response = self.client.delete(url)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-    def test_athlete_sees_only_own_missions(self):
-        # Mission for athlete1
-        Mission.objects.create(
-            coach=self.coach, athlete=self.athlete, title="M1", 
-            pace="4:00", distance=5, hr_zone=3, scheduled_date="2024-01-01", scheduled_time="00:00"
-        )
-        # Mission for athlete2
-        Mission.objects.create(
-            coach=self.coach, athlete=self.other_athlete, title="M2", 
-            pace="4:00", distance=5, hr_zone=3, scheduled_date="2024-01-01", scheduled_time="00:00"
-        )
-        
-        self.client.force_authenticate(user=self.athlete)
-        response = self.client.get(self.mission_url)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['title'], "M1")
+        # Intentionally don't send coach ID
+        resp = self.client.post(self.list_url, data)
+        self.assertEqual(resp.status_code, 201)
+        mission = Mission.objects.get(id=resp.data['id'])
+        self.assertEqual(mission.coach, self.coach)

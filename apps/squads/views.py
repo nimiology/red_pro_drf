@@ -8,6 +8,13 @@ class SquadViewSet(viewsets.ModelViewSet):
     queryset = Squad.objects.all()
     serializer_class = SquadSerializer
     permission_classes = [IsCoachOrReadOnly]
+    filterset_fields = {
+        'name': ['exact', 'icontains'],
+        'coach': ['exact'],
+        'created_at': ['exact', 'gt', 'lt'],
+    }
+    ordering_fields = '__all__'
+    ordering = ['-created_at']
 
     def get_queryset(self):
         user = self.request.user
