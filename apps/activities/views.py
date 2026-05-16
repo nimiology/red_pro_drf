@@ -4,6 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django.views import View
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django.conf import settings
 from decouple import config
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -69,7 +70,7 @@ class StravaWebhookView(View):
         hub_challenge = request.GET.get('hub.challenge')
         hub_verify_token = request.GET.get('hub.verify_token')
 
-        if hub_mode == 'subscribe' and hub_verify_token == config('STRAVA_VERIFY_TOKEN', default=''):
+        if hub_mode == 'subscribe' and hub_verify_token == settings.STRAVA_VERIFY_TOKEN:
             return JsonResponse({'hub.challenge': hub_challenge})
         
         return HttpResponse("Invalid verify token", status=403)

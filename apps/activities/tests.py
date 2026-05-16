@@ -20,33 +20,33 @@ class StravaWebhookTests(APITestCase):
             strava_refresh_token='refresh_123'
         )
 
-    @patch('apps.activities.views.config')
-    def test_webhook_validation_success(self, mock_config):
+    def test_webhook_validation_success(self):
         """
         Test the GET handshake from Strava.
         """
-        mock_config.return_value = self.verify_token
-        challenge = 'test_challenge'
-        response = self.client.get(self.webhook_url, {
-            'hub.mode': 'subscribe',
-            'hub.challenge': challenge,
-            'hub.verify_token': self.verify_token
-        })
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.json()['hub.challenge'], challenge)
+        from django.test import override_settings
+        with override_settings(STRAVA_VERIFY_TOKEN=self.verify_token):
+            challenge = 'test_challenge'
+            response = self.client.get(self.webhook_url, {
+                'hub.mode': 'subscribe',
+                'hub.challenge': challenge,
+                'hub.verify_token': self.verify_token
+            })
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.json()['hub.challenge'], challenge)
 
-    @patch('apps.activities.views.config')
-    def test_webhook_validation_failure(self, mock_config):
+    def test_webhook_validation_failure(self):
         """
         Test handshake with wrong verify token.
         """
-        mock_config.return_value = self.verify_token
-        response = self.client.get(self.webhook_url, {
-            'hub.mode': 'subscribe',
-            'hub.challenge': 'test_challenge',
-            'hub.verify_token': 'wrong_token'
-        })
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        from django.test import override_settings
+        with override_settings(STRAVA_VERIFY_TOKEN=self.verify_token):
+            response = self.client.get(self.webhook_url, {
+                'hub.mode': 'subscribe',
+                'hub.challenge': 'test_challenge',
+                'hub.verify_token': 'wrong_token'
+            })
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     @patch('apps.activities.services.StravaSyncService.sync_activity')
     def test_webhook_activity_create_event(self, mock_sync):
