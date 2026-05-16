@@ -1,8 +1,8 @@
+from django.contrib.auth import get_user_model
 from django.db import models
-from django.conf import settings
 
 class Activity(models.Model):
-    athlete = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='activities')
+    athlete = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='activities')
     
     # Core Identification
     strava_id = models.BigIntegerField(unique=True)
@@ -41,10 +41,10 @@ class Activity(models.Model):
     
     # Date & Time
     start_date = models.DateTimeField()
-    start_date_local = models.DateTimeField()
-    timezone = models.CharField(max_length=100)
-    utc_offset = models.IntegerField()
-    
+    start_date_local = models.DateTimeField(null=True, blank=True)
+    timezone = models.CharField(max_length=100, null=True, blank=True)
+    utc_offset = models.FloatField(null=True, blank=True)
+
     # Location
     start_latlng = models.JSONField(null=True, blank=True)
     end_latlng = models.JSONField(null=True, blank=True)
@@ -53,7 +53,7 @@ class Activity(models.Model):
     map_polyline = models.TextField(null=True, blank=True)
     summary_polyline = models.TextField(null=True, blank=True)
     
-    # Metadata
+    # Social & Settings
     achievement_count = models.IntegerField(default=0)
     kudos_count = models.IntegerField(default=0)
     comment_count = models.IntegerField(default=0)
@@ -61,7 +61,7 @@ class Activity(models.Model):
     photo_count = models.IntegerField(default=0)
     total_photo_count = models.IntegerField(default=0)
     
-    # Status
+    # Flags
     trainer = models.BooleanField(default=False)
     commute = models.BooleanField(default=False)
     manual = models.BooleanField(default=False)
@@ -71,8 +71,8 @@ class Activity(models.Model):
     # Gear
     gear_id = models.CharField(max_length=50, null=True, blank=True)
     
-    # Full Strava JSON
-    raw_data = models.JSONField()
+    # Metadata
+    raw_data = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name_plural = "Activities"
