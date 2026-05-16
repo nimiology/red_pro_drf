@@ -11,10 +11,10 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-red-pro-dev-key')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', cast=bool, default=False)
-
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*', cast=Csv())
-CSRF_TRUSTED_ORIGINS = ALLOWED_HOSTS
-CSRF_TRUSTED_ORIGINS =ALLOWED_HOSTS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host != '*']
+
 # Application definition
 INSTALLED_APPS = [
     # Django core apps
