@@ -5,7 +5,7 @@ class Activity(models.Model):
     athlete = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='activities')
     
     # Core Identification
-    strava_id = models.BigIntegerField(unique=True)
+    strava_id = models.BigIntegerField(unique=True, null=True, blank=True)
     external_id = models.CharField(max_length=255, null=True, blank=True)
     upload_id = models.BigIntegerField(null=True, blank=True)
     
@@ -41,9 +41,6 @@ class Activity(models.Model):
     
     # Date & Time
     start_date = models.DateTimeField()
-    start_date_local = models.DateTimeField(null=True, blank=True)
-    timezone = models.CharField(max_length=100, null=True, blank=True)
-    utc_offset = models.FloatField(null=True, blank=True)
 
     # Location
     start_latlng = models.JSONField(null=True, blank=True)
@@ -53,26 +50,8 @@ class Activity(models.Model):
     map_polyline = models.TextField(null=True, blank=True)
     summary_polyline = models.TextField(null=True, blank=True)
     
-    # Social & Settings
-    achievement_count = models.IntegerField(default=0)
-    kudos_count = models.IntegerField(default=0)
-    comment_count = models.IntegerField(default=0)
-    athlete_count = models.IntegerField(default=1)
-    photo_count = models.IntegerField(default=0)
-    total_photo_count = models.IntegerField(default=0)
-    
-    # Flags
-    trainer = models.BooleanField(default=False)
-    commute = models.BooleanField(default=False)
-    manual = models.BooleanField(default=False)
-    private = models.BooleanField(default=False)
-    flagged = models.BooleanField(default=False)
-    
-    # Gear
-    gear_id = models.CharField(max_length=50, null=True, blank=True)
-    
     # Metadata
-    raw_data = models.JSONField(null=True, blank=True)
+    achievement_count = models.IntegerField(default=0)
 
     class Meta:
         verbose_name_plural = "Activities"

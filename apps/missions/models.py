@@ -30,6 +30,15 @@ class Mission(models.Model):
         blank=True
     )
 
+    satisfying_activity = models.ForeignKey(
+        'activities.Activity',
+        on_delete=models.SET_NULL,
+        related_name='satisfied_missions',
+        null=True,
+        blank=True,
+        help_text="The activity that successfully completed this mission"
+    )
+
     title = models.CharField(max_length=255)
     
     # Mission Parameters

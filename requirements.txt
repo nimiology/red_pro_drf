@@ -11,3 +11,6 @@ python-dateutil==2.9.0.post0
 pytz==2025.2
 requests==2.32.4
 django-debug-toolbar==5.2.0
+gunicorn==21.2.0
+celery==5.3.6
+redis==5.0.1

@@ -5,16 +5,22 @@ from django.views import View
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from decouple import config
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
+from apps.accounts.permissions import IsOwnerOrCoachReadOnly
+
 from .models import Activity
 from .serializers import ActivitySerializer
 from .services import StravaSyncService
 from apps.squads.models import Squad
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
+from django.db.models import Q
 
-class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
+class ActivityViewSet(viewsets.ModelViewSet):
     serializer_class = ActivitySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOwnerOrCoachReadOnly]
     filterset_fields = {
         'type': ['exact', 'in'],
         'sport_type': ['exact', 'in'],
@@ -26,13 +32,32 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-start_date']
 
     def get_queryset(self):
-        # Athletes see their own activities, Coaches see their squad activities
+        # Athletes see their own activities, Coaches see their own + squad activities
         user = self.request.user
         if user.role == 'COACH':
-            # Simplified: see all activities of athletes in their managed squads
-            athlete_ids = Squad.objects.filter(coach=user).values_list('athletes', flat=True)
-            return Activity.objects.filter(athlete_id__in=athlete_ids)
+            return Activity.objects.filter(
+                Q(athlete=user) | Q(athlete__squads__coach=user)
+            ).distinct()
         return Activity.objects.filter(athlete=user)
+
+    def perform_create(self, serializer):
+        serializer.save(athlete=self.request.user)
+
+
+
+    @action(detail=False, methods=['post'])
+    def manual_sync(self, request):
+        """
+        Manually trigger a sync of recent Strava activities for the authenticated user.
+        """
+        user = request.user
+        if not user.strava_id:
+            return Response({'error': 'User is not connected to Strava.'}, status=400)
+            
+        success = StravaSyncService.sync_recent_activities(user)
+        if success:
+            return Response({'status': 'Sync completed successfully.'})
+        return Response({'error': 'Failed to sync activities.'}, status=500)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StravaWebhookView(View):

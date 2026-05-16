@@ -4,6 +4,7 @@ from rest_framework.test import APITestCase
 from apps.accounts.models import User
 from apps.squads.models import Squad
 from .models import Mission
+from apps.activities.models import Activity
 
 class MissionMatrixSmashTests(APITestCase):
     """
@@ -137,3 +138,49 @@ class MissionMatrixSmashTests(APITestCase):
         self.assertEqual(resp.status_code, 201)
         mission = Mission.objects.get(id=resp.data['id'])
         self.assertEqual(mission.coach, self.coach)
+
+    def test_summary_endpoint(self):
+        """
+        Test the summary endpoint returns data for the user's missions.
+        """
+        self.client.force_authenticate(user=self.coach)
+        url = reverse('mission-summary')
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        # 2 missions, both should be PENDING by default
+        self.assertEqual(resp.data.get('PENDING', 0), 2)
+        self.assertEqual(resp.data.get('total', 0), 2)
+
+    def test_satisfying_activity_validation(self):
+        """
+        Test that an activity can only satisfy a mission if it belongs to the assigned athlete.
+        """
+        
+        # Create an activity for the assigned athlete
+        activity_athlete = Activity.objects.create(
+            athlete=self.athlete, strava_id=1, name="A", distance=5, moving_time=1,
+            elapsed_time=1, total_elevation_gain=1, type="Run", sport_type="Run",
+            average_speed=1, max_speed=1, start_date="2024-05-20T08:00:00Z"
+        )
+        
+        # Create an activity for a stranger
+        activity_stranger = Activity.objects.create(
+            athlete=self.stranger, strava_id=2, name="B", distance=5, moving_time=1,
+            elapsed_time=1, total_elevation_gain=1, type="Run", sport_type="Run",
+            average_speed=1, max_speed=1, start_date="2024-05-20T08:00:00Z"
+        )
+        
+        self.client.force_authenticate(user=self.coach)
+        
+        # Valid: assigning athlete's activity to their mission
+        resp = self.client.patch(self.detail_url(self.mission_direct.pk), {
+            "satisfying_activity": activity_athlete.pk
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        
+        # Invalid: assigning stranger's activity to athlete's mission
+        resp = self.client.patch(self.detail_url(self.mission_direct.pk), {
+            "satisfying_activity": activity_stranger.pk
+        })
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('satisfying_activity', resp.data)
