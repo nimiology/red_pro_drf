@@ -13,7 +13,8 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-red-pro-dev-key')
 DEBUG = config('DEBUG', cast=bool, default=False)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*', cast=Csv())
-
+CSRF_TRUSTED_ORIGINS = ALLOWED_HOSTS
+CSRF_TRUSTED_ORIGINS =ALLOWED_HOSTS
 # Application definition
 INSTALLED_APPS = [
     # Django core apps
