@@ -35,7 +35,10 @@ INSTALLED_APPS = [
     'corsheaders',
 
     # Local apps
-    'apps.red',
+    'apps.accounts',
+    'apps.activities',
+    'apps.squads',
+    'apps.missions',
 ]
 
 MIDDLEWARE = [
@@ -135,8 +138,20 @@ DJOSER = {
     'PASSWORD_RESET_SHOW_EMAIL_NOT_FOUND': True,
     'SEND_ACTIVATION_EMAIL': False,
     'SEND_CONFIRMATION_EMAIL': False,
+    'SERIALIZERS': {
+        'user': 'apps.accounts.serializers.UserSerializer',
+        'current_user': 'apps.accounts.serializers.UserSerializer',
+        'user_create': 'djoser.serializers.UserCreateSerializer',
+    },
 }
+
+AUTH_USER_MODEL = 'accounts.User'
 
 INTERNAL_IPS = ['127.0.0.1']
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Strava Integration
+STRAVA_CLIENT_ID = config('STRAVA_CLIENT_ID', default='')
+STRAVA_CLIENT_SECRET = config('STRAVA_CLIENT_SECRET', default='')
+STRAVA_REDIRECT_URI = config('STRAVA_REDIRECT_URI', default='http://localhost:8000/accounts/strava_callback/')

@@ -26,5 +26,8 @@ urlpatterns = [
     path('auth/', include('djoser.urls.jwt')),
     
     # App URLs
-    path('api/red/', include('apps.red.urls')),
+    path('accounts/', include('apps.accounts.urls')),
+    path('activities/', include('apps.activities.urls')),
+    path('squads/', include('apps.squads.urls')),
+    path('missions/', include('apps.missions.urls')),
 ]

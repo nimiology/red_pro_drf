@@ -1,9 +1,11 @@
+from django.urls import path
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import RedItemViewSet
+from .views import MissionViewSet
 
 router = DefaultRouter()
-router.register(r'items', RedItemViewSet, basename='red-item')
+router.register(r'', MissionViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
