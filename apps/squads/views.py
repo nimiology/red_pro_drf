@@ -1,6 +1,11 @@
 from rest_framework import viewsets, permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
 from .models import Squad
 from .serializers import SquadSerializer
+from .leaderboard_serializers import LeaderboardEntrySerializer
+from .services import LeaderboardService
 
 from apps.accounts.permissions import IsCoachOrReadOnly
 
@@ -26,3 +31,16 @@ class SquadViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(coach=self.request.user)
+
+    @action(detail=True, methods=['get'], url_path='leaderboard', url_name='leaderboard')
+    def leaderboard(self, request, pk=None):
+        """
+        Returns the ranked leaderboard for this squad.
+        Query params:
+            period — 'weekly' (default), 'monthly', or 'all_time'
+        """
+        squad = self.get_object()
+        period = request.query_params.get('period', 'weekly')
+        data = LeaderboardService.get_squad_leaderboard(squad, period)
+        serializer = LeaderboardEntrySerializer(data, many=True)
+        return Response(serializer.data)
