@@ -158,3 +158,14 @@ STRAVA_CLIENT_SECRET = config('STRAVA_CLIENT_SECRET', default='')
 STRAVA_REDIRECT_URI = config('STRAVA_REDIRECT_URI', default='http://localhost:8000/accounts/strava_callback/')
 STRAVA_WEBHOOK_URL = config('STRAVA_WEBHOOK_URL', default='http://localhost:8000/activities/webhook/')
 STRAVA_VERIFY_TOKEN = config('STRAVA_VERIFY_TOKEN', default='')
+
+# Cache (Redis)
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": config("REDIS_URL", default="redis://127.0.0.1:6379/0"),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    }
+}

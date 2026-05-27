@@ -18,6 +18,19 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  redis:
+    image: redis:7-alpine
+    container_name: red_pro_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   backend:
     build:
       context: .
@@ -36,6 +49,7 @@ services:
       - .env
     depends_on:
       - db
+      - redis
     logging:
       driver: "json-file"
       options:
@@ -44,3 +58,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
