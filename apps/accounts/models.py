@@ -24,7 +24,6 @@ class User(AbstractUser):
     strava_access_token = models.TextField(null=True, blank=True)
     strava_refresh_token = models.TextField(null=True, blank=True)
     strava_token_expires_at = models.DateTimeField(null=True, blank=True)
-    strava_raw_profile = models.JSONField(null=True, blank=True)
 
     def __str__(self):
         return self.username

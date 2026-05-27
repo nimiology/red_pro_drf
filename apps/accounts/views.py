@@ -2,10 +2,14 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+import requests
 from .models import User
 from .serializers import UserSerializer
+from .strava_cache import set_strava_raw_profile
 from django.conf import settings
+from django.utils.timezone import now
+from datetime import timedelta
+
 
 class UserViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -33,8 +37,7 @@ class UserViewSet(viewsets.ViewSet):
         """
         Handles the callback from Strava, exchanges code for tokens.
         """
-        from django.conf import settings
-        import requests
+
         
         code = request.query_params.get('code')
         if not code:
@@ -74,11 +77,12 @@ class UserViewSet(viewsets.ViewSet):
         user.strava_id = str(data['athlete']['id'])
         user.strava_access_token = data['access_token']
         user.strava_refresh_token = data['refresh_token']
-        from django.utils.timezone import now
-        from datetime import timedelta
+   
         user.strava_token_expires_at = now() + timedelta(seconds=data['expires_in'])
-        user.strava_raw_profile = data['athlete']
         user.save()
+
+        # Store the athlete profile blob in Redis (not in the DB).
+        set_strava_raw_profile(user.pk, data['athlete'])
 
         return Response({"status": "strava connected successfully"})
 

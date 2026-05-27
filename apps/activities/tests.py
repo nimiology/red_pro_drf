@@ -68,6 +68,22 @@ class StravaWebhookTests(APITestCase):
         # but let's see if the patch works.
         mock_sync.assert_called_once_with(987654321, 123456)
 
+    @patch('apps.activities.views.StravaWebhookView._refresh_athlete_profile')
+    def test_webhook_athlete_update_event(self, mock_refresh):
+        """
+        Test that an athlete.update webhook triggers profile re-fetch.
+        """
+        payload = {
+            'object_type': 'athlete',
+            'aspect_type': 'update',
+            'object_id': 123456,
+            'owner_id': 123456,
+            'event_time': 1516126040,
+        }
+        response = self.client.post(self.webhook_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_refresh.assert_called_once_with(123456)
+
 class ActivityAPITests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='testuser', password='password123')

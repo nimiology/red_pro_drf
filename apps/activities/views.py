@@ -16,7 +16,9 @@ from .services import StravaSyncService
 from apps.squads.models import Squad
 from rest_framework.decorators import action
 from rest_framework.response import Response
-
+import requests as http_requests
+from apps.accounts.models import User
+from apps.accounts.strava_cache import set_strava_raw_profile
 from django.db.models import Q
 
 class ActivityViewSet(viewsets.ModelViewSet):
@@ -84,7 +86,6 @@ class StravaWebhookView(View):
         except json.JSONDecodeError:
             return HttpResponse(status=400)
 
-        # We only care about new activities
         object_type = data.get('object_type')
         aspect_type = data.get('aspect_type')
         object_id = data.get('object_id')
@@ -97,4 +98,35 @@ class StravaWebhookView(View):
                 args=(object_id, owner_id)
             ).start()
 
+        elif object_type == 'athlete' and aspect_type == 'update':
+            # Athlete profile changed — re-fetch and update Redis.
+            threading.Thread(
+                target=self._refresh_athlete_profile,
+                args=(owner_id,)
+            ).start()
+
         return HttpResponse(status=200)
+
+    @staticmethod
+    def _refresh_athlete_profile(strava_athlete_id):
+        """
+        Re-fetch the athlete profile from Strava and store in Redis.
+        Called when a Strava 'athlete.update' webhook is received.
+        """
+
+
+        try:
+            user = User.objects.get(strava_id=strava_athlete_id)
+        except User.DoesNotExist:
+            return
+
+        access_token = StravaSyncService.refresh_user_token(user)
+        if not access_token:
+            return
+
+        response = http_requests.get(
+            "https://www.strava.com/api/v3/athlete",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code == 200:
+            set_strava_raw_profile(user.pk, response.json())
