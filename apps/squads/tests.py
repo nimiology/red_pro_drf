@@ -335,3 +335,43 @@ class LeaderboardAlgoTests(APITestCase):
         for entry in response.data:
             self.assertEqual(set(entry.keys()), expected_fields)
 
+
+class SquadMembersTests(APITestCase):
+    """
+    Tests for the /squads/{id}/members/ endpoint.
+    """
+    def setUp(self):
+        self.coach = User.objects.create_user(username='members_coach', password='password', role='COACH')
+        self.athlete1 = User.objects.create_user(username='members_a1', password='password', role='ATHLETE')
+        self.athlete2 = User.objects.create_user(username='members_a2', password='password', role='ATHLETE')
+        self.stranger = User.objects.create_user(username='members_stranger', password='password', role='NONE')
+
+        self.squad = Squad.objects.create(name='Members Squad', coach=self.coach)
+        SquadMembership.objects.create(squad=self.squad, athlete=self.athlete1)
+        SquadMembership.objects.create(squad=self.squad, athlete=self.athlete2)
+
+        self.url = reverse('squad-members', kwargs={'pk': self.squad.pk})
+
+    def test_get_members_as_coach(self):
+        """Coach can retrieve members of their squad."""
+        self.client.force_authenticate(user=self.coach)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        usernames = {u['username'] for u in response.data}
+        self.assertEqual(usernames, {'members_a1', 'members_a2'})
+
+    def test_get_members_as_athlete(self):
+        """Athlete can retrieve members of a squad they belong to."""
+        self.client.force_authenticate(user=self.athlete1)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        usernames = {u['username'] for u in response.data}
+        self.assertEqual(usernames, {'members_a1', 'members_a2'})
+
+    def test_get_members_as_stranger(self):
+        """Stranger cannot retrieve members of a squad they do not belong to (returns 404)."""
+        self.client.force_authenticate(user=self.stranger)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

@@ -10,9 +10,23 @@ from django.conf import settings
 from django.utils.timezone import now
 from datetime import timedelta
 
+from django.db.models import Q
 
-class UserViewSet(viewsets.ViewSet):
+class UserViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return User.objects.none()
+        
+        return User.objects.filter(
+            Q(id=user.id) | 
+            Q(squads__coach=user) | 
+            Q(managed_squads__athletes=user) |
+            Q(squads__in=user.squads.all())
+        ).distinct()
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def strava_auth_url(self, request):

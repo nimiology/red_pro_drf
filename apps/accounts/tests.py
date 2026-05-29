@@ -423,3 +423,62 @@ class ProfilePicAPIFallbackTests(APITestCase):
         mock_refresh.assert_not_called()
         mock_get.assert_not_called()
 
+# ---------------------------------------------------------------------------
+# UserViewSet permissions matrix tests
+# ---------------------------------------------------------------------------
+from apps.squads.models import Squad, SquadMembership
+
+@override_settings(CACHES=LOCMEM_CACHE)
+class UserViewSetPermissionsMatrixTests(APITestCase):
+    def setUp(self):
+        self.coach1 = User.objects.create_user(username='coach1', role=User.Role.COACH)
+        self.athlete1 = User.objects.create_user(username='athlete1', role=User.Role.ATHLETE)
+        self.athlete2 = User.objects.create_user(username='athlete2', role=User.Role.ATHLETE)
+        
+        self.squad1 = Squad.objects.create(name='Squad 1', coach=self.coach1)
+        SquadMembership.objects.create(squad=self.squad1, athlete=self.athlete1)
+        SquadMembership.objects.create(squad=self.squad1, athlete=self.athlete2)
+
+        self.coach2 = User.objects.create_user(username='coach2', role=User.Role.COACH)
+        self.athlete3 = User.objects.create_user(username='athlete3', role=User.Role.ATHLETE)
+        
+        self.squad2 = Squad.objects.create(name='Squad 2', coach=self.coach2)
+        SquadMembership.objects.create(squad=self.squad2, athlete=self.athlete3)
+
+        self.unrelated = User.objects.create_user(username='unrelated', role=User.Role.NONE)
+
+    def test_user_list_and_retrieve_permissions(self):
+        # Format: (requesting_user, expected_visible_users)
+        matrix = [
+            (self.coach1, {self.coach1, self.athlete1, self.athlete2}),
+            (self.athlete1, {self.athlete1, self.athlete2, self.coach1}),
+            (self.coach2, {self.coach2, self.athlete3}),
+            (self.athlete3, {self.athlete3, self.coach2}),
+            (self.unrelated, {self.unrelated}),
+        ]
+        
+        list_url = reverse('user-list')
+        
+        for user, expected_visible in matrix:
+            self.client.force_authenticate(user=user)
+            
+            # Test List
+            response = self.client.get(list_url)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            # Depending on pagination, response.data might be a dict with 'results' or a list.
+            # Assuming no pagination by default or if there is, we check results.
+            data = response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
+            visible_ids = {u['id'] for u in data}
+            expected_ids = {u.id for u in expected_visible}
+            self.assertEqual(visible_ids, expected_ids, f"List failed for {user.username}")
+            
+            # Test Retrieve
+            all_users = [self.coach1, self.athlete1, self.athlete2, self.coach2, self.athlete3, self.unrelated]
+            for target_user in all_users:
+                detail_url = reverse('user-detail', kwargs={'pk': target_user.pk})
+                response = self.client.get(detail_url)
+                if target_user in expected_visible:
+                    self.assertEqual(response.status_code, status.HTTP_200_OK, f"Retrieve failed for {user.username} accessing {target_user.username}")
+                else:
+                    self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, f"Retrieve should fail for {user.username} accessing {target_user.username}")
+

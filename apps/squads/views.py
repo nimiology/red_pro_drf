@@ -6,7 +6,7 @@ from .models import Squad
 from .serializers import SquadSerializer
 from .leaderboard_serializers import LeaderboardEntrySerializer
 from .services import LeaderboardService
-
+from apps.accounts.serializers import UserSerializer
 from apps.accounts.permissions import IsCoachOrReadOnly
 
 class SquadViewSet(viewsets.ModelViewSet):
@@ -43,4 +43,13 @@ class SquadViewSet(viewsets.ModelViewSet):
         period = request.query_params.get('period', 'weekly')
         data = LeaderboardService.get_squad_leaderboard(squad, period)
         serializer = LeaderboardEntrySerializer(data, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='members', url_name='members')
+    def members(self, request, pk=None):
+        """
+        Returns the athletes (members) of this squad.
+        """
+        squad = self.get_object()
+        serializer = UserSerializer(squad.athletes.all(), many=True, context={'request': request})
         return Response(serializer.data)
