@@ -10,6 +10,7 @@ from apps.accounts.strava_cache import (
     delete_strava_raw_profile,
 )
 import datetime
+from unittest.mock import patch, MagicMock
 
 
 LOCMEM_CACHE = {
@@ -120,6 +121,45 @@ class StravaOAuthTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response['Content-Type'], 'text/html; charset=utf-8')
         self.assertIn(b'Connection Failed', response.content)
+
+    @patch('apps.accounts.views.requests.post')
+    @patch('apps.activities.services.StravaSyncService.ensure_webhook_subscribed')
+    def test_strava_callback_success(self, mock_subscribe, mock_post):
+        # Mock the exchange response from Strava token endpoint
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "mock_access",
+            "refresh_token": "mock_refresh",
+            "expires_in": 3600,
+            "athlete": {
+                "id": 99999,
+                "firstname": "John",
+                "lastname": "Doe"
+            }
+        }
+        mock_post.return_value = mock_response
+
+        url = reverse('user-strava-callback')
+        # Call GET to the callback endpoint with code and state (user id)
+        response = self.client.get(url, {
+            'code': 'test_auth_code',
+            'state': self.user.id
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'text/html; charset=utf-8')
+        self.assertIn(b'Strava Connected', response.content)
+
+        # Refresh from database and assert tokens and strava_id were saved
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.strava_id, '99999')
+        self.assertEqual(self.user.strava_access_token, 'mock_access')
+        self.assertEqual(self.user.strava_refresh_token, 'mock_refresh')
+        self.assertIsNotNone(self.user.strava_token_expires_at)
+
+        # Verify that ensure_webhook_subscribed was triggered
+        mock_subscribe.assert_called_once()
 
 
 

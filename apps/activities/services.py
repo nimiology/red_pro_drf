@@ -169,3 +169,64 @@ class StravaSyncService:
             page += 1
 
         return True
+
+    @staticmethod
+    def ensure_webhook_subscribed():
+        """
+        Checks if a push subscription is already active on Strava for this client.
+        If not, creates one using settings.STRAVA_WEBHOOK_URL and settings.STRAVA_VERIFY_TOKEN.
+        """
+        client_id = settings.STRAVA_CLIENT_ID
+        client_secret = settings.STRAVA_CLIENT_SECRET
+        verify_token = settings.STRAVA_VERIFY_TOKEN
+        callback_url = settings.STRAVA_WEBHOOK_URL
+
+        if not client_id or not client_secret or not callback_url or not verify_token:
+            print("Strava credentials or webhook configurations are incomplete. Skipping subscription activation.")
+            return False
+
+        # 1. Check existing subscriptions
+        get_url = "https://www.strava.com/api/v3/push_subscriptions"
+        params = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+        }
+        try:
+            response = requests.get(get_url, params=params)
+            if response.status_code == 200:
+                subscriptions = response.json()
+                # If there's an active subscription with the exact same callback URL, we're good!
+                for sub in subscriptions:
+                    if sub.get('callback_url') == callback_url:
+                        print(f"Webhook already subscribed with ID {sub.get('id')} to {callback_url}")
+                        return True
+                    else:
+                        # If a subscription exists but points to a different callback URL, we should delete it.
+                        # Strava only allows 1 subscription per application client.
+                        sub_id = sub.get('id')
+                        print(f"Deleting outdated/conflicting Strava webhook subscription {sub_id}...")
+                        delete_url = f"https://www.strava.com/api/v3/push_subscriptions/{sub_id}"
+                        requests.delete(delete_url, data=params)
+        except Exception as e:
+            print(f"Error checking existing Strava subscriptions: {e}")
+
+        # 2. Create the subscription
+        payload = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'callback_url': callback_url,
+            'verify_token': verify_token
+        }
+        try:
+            print(f"Subscribing to Strava webhooks with callback: {callback_url}...")
+            response = requests.post(get_url, data=payload)
+            if response.status_code == 201:
+                data = response.json()
+                print(f"Successfully subscribed! ID: {data.get('id')}")
+                return True
+            else:
+                print(f"Failed to subscribe: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            print(f"Error creating Strava webhook subscription: {e}")
+            return False

@@ -12,6 +12,8 @@ from datetime import timedelta
 from django.shortcuts import render as django_render
 
 from django.db.models import Q
+import threading
+from apps.activities.services import StravaSyncService
 
 
 def render_strava_status_page(request, success=True, error_message=None):
@@ -112,5 +114,10 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Store the athlete profile blob in Redis (not in the DB).
         set_strava_raw_profile(user.pk, data['athlete'])
+
+        # Ensure that the Strava webhook subscription is active (run in a background thread)
+        threading.Thread(
+            target=StravaSyncService.ensure_webhook_subscribed
+        ).start()
 
         return render_strava_status_page(request, success=True)
