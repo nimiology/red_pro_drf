@@ -9,8 +9,20 @@ from .strava_cache import set_strava_raw_profile
 from django.conf import settings
 from django.utils.timezone import now
 from datetime import timedelta
+from django.shortcuts import render as django_render
 
 from django.db.models import Q
+
+
+def render_strava_status_page(request, success=True, error_message=None):
+    """Render a branded HTML status page for the Strava OAuth callback."""
+    if success:
+        return django_render(request, 'accounts/strava_success.html')
+    context = {
+        'error_message': error_message or 'An unexpected error occurred during Strava authentication.',
+    }
+    return django_render(request, 'accounts/strava_error.html', context)
+
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -42,7 +54,8 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
             f"client_id={client_id}&"
             f"redirect_uri={redirect_uri}&"
             f"response_type=code&"
-            f"scope={scope}"
+            f"scope={scope}&"
+            f"state={request.user.id}"
         )
         return Response({"url": auth_url})
 
@@ -51,11 +64,11 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Handles the callback from Strava, exchanges code for tokens.
         """
-
-        
         code = request.query_params.get('code')
+        state = request.query_params.get('state')
+
         if not code:
-            return Response({"error": "No code provided"}, status=status.HTTP_400_BAD_REQUEST)
+            return render_strava_status_page(request, success=False, error_message="No authorization code was provided from Strava. Please try again.")
 
         # Exchange code for tokens
         response = requests.post(
@@ -69,24 +82,26 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         if response.status_code != 200:
-            return Response(response.json(), status=response.status_code)
+            err_msg = "Failed to exchange authorization code for access tokens. Please try again."
+            try:
+                err_data = response.json()
+                if 'message' in err_data:
+                    err_msg = err_data['message']
+            except Exception:
+                pass
+            return render_strava_status_page(request, success=False, error_message=err_msg)
 
         data = response.json()
-        # Note: In a real callback, we might not have the user authenticated in the session 
-        # if they are coming from an external redirect. 
-        # We might need a 'state' parameter to link back to the user.
-        # For now, I'll assume we can use the authenticated user if the session persists,
-        # or we might need to handle this differently for mobile.
         
         user = request.user
+        if not user.is_authenticated and state:
+            try:
+                user = User.objects.get(pk=state)
+            except (User.DoesNotExist, ValueError):
+                pass
+
         if not user.is_authenticated:
-            # If not authenticated (common for OAuth redirects), we'd usually use 'state'
-            # to find the user. For now, let's return the data so the frontend can handle it
-            # if they are using a webview or similar.
-            return Response({
-                "message": "Strava tokens received. Please send them to connect_strava endpoint.",
-                "strava_data": data
-            })
+            return render_strava_status_page(request, success=False, error_message="Could not identify your Red Pro account. Please make sure you start the connection flow inside the app.")
 
         user.strava_id = str(data['athlete']['id'])
         user.strava_access_token = data['access_token']
@@ -98,5 +113,4 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         # Store the athlete profile blob in Redis (not in the DB).
         set_strava_raw_profile(user.pk, data['athlete'])
 
-        return Response({"status": "strava connected successfully"})
-
+        return render_strava_status_page(request, success=True)

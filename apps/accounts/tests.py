@@ -117,7 +117,9 @@ class StravaOAuthTests(APITestCase):
     def test_strava_callback_no_code(self):
         url = reverse('user-strava-callback')
         response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'text/html; charset=utf-8')
+        self.assertIn(b'Connection Failed', response.content)
 
 
 
