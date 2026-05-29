@@ -7,6 +7,7 @@ from apps.accounts.models import User
 from .models import Activity
 from decouple import config
 from apps.squads.models import Squad
+from .services import StravaSyncService
 
 class StravaWebhookTests(APITestCase):
     def setUp(self):
@@ -262,3 +263,227 @@ class ActivityMatrixSmashTests(APITestCase):
         resp = self.client.post(url)
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         mock_sync_recent.assert_called_once_with(self.athlete)
+
+
+class IncrementalSyncTests(TestCase):
+    """Tests for StravaSyncService.sync_recent_activities incremental logic."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='sync_user',
+            password='pass',
+            strava_id='999',
+            strava_access_token='tok_abc',
+            strava_refresh_token='ref_abc',
+        )
+        # Ensure date_joined is set (AbstractUser does this automatically)
+        self.date_joined_epoch = int(self.user.date_joined.timestamp())
+
+    def _make_strava_activity(self, strava_id, name='Run', start_date='2025-06-01T08:00:00Z'):
+        """Helper to build a Strava-like activity dict."""
+        return {
+            'id': strava_id,
+            'name': name,
+            'type': 'Run',
+            'sport_type': 'Run',
+            'distance': 5000,
+            'moving_time': 1200,
+            'elapsed_time': 1300,
+            'total_elevation_gain': 50,
+            'start_date': start_date,
+            'average_speed': 4.0,
+            'max_speed': 6.0,
+            'has_heartrate': False,
+            'average_heartrate': None,
+            'max_heartrate': None,
+            'calories': 300,
+            'elev_high': 100,
+            'elev_low': 50,
+            'map': {'summary_polyline': 'abc123'},
+            'achievement_count': 2,
+        }
+
+    @patch('apps.activities.services.StravaSyncService.refresh_user_token')
+    @patch('apps.activities.services.requests.get')
+    def test_sync_uses_latest_activity_date_when_activities_exist(self, mock_get, mock_refresh):
+        """
+        When the user already has activities, the Strava API should be called
+        with 'after' = the latest activity's start_date epoch.
+        """
+        mock_refresh.return_value = 'fresh_token'
+
+        # Create an existing activity
+        existing = Activity.objects.create(
+            athlete=self.user, strava_id=100, name='Old Run',
+            distance=3000, moving_time=900, elapsed_time=1000,
+            total_elevation_gain=20, type='Run', sport_type='Run',
+            average_speed=3.5, max_speed=5.0,
+            start_date='2025-05-15T10:00:00Z',
+        )
+        existing.refresh_from_db()
+        expected_after = int(existing.start_date.timestamp())
+
+        # Mock Strava API: page 1 returns one activity, page 2 returns empty
+        mock_response_page1 = MagicMock()
+        mock_response_page1.status_code = 200
+        mock_response_page1.json.return_value = [
+            self._make_strava_activity(200, 'New Run', '2025-06-01T08:00:00Z')
+        ]
+
+        mock_response_page2 = MagicMock()
+        mock_response_page2.status_code = 200
+        mock_response_page2.json.return_value = []
+
+        mock_get.side_effect = [mock_response_page1, mock_response_page2]
+
+        result = StravaSyncService.sync_recent_activities(self.user)
+        self.assertTrue(result)
+
+        # Verify the 'after' param was the latest activity's epoch
+        first_call_params = mock_get.call_args_list[0]
+        self.assertEqual(first_call_params[1]['params']['after'], expected_after)
+
+        # Verify new activity was created
+        self.assertTrue(Activity.objects.filter(strava_id=200).exists())
+        # Old activity should still be there
+        self.assertTrue(Activity.objects.filter(strava_id=100).exists())
+        self.assertEqual(Activity.objects.filter(athlete=self.user).count(), 2)
+
+    @patch('apps.activities.services.StravaSyncService.refresh_user_token')
+    @patch('apps.activities.services.requests.get')
+    def test_sync_uses_date_joined_when_no_activities(self, mock_get, mock_refresh):
+        """
+        When the user has no activities, the Strava API should be called
+        with 'after' = user.date_joined epoch.
+        """
+        mock_refresh.return_value = 'fresh_token'
+
+        # No existing activities for this user
+        self.assertEqual(Activity.objects.filter(athlete=self.user).count(), 0)
+
+        mock_response_page1 = MagicMock()
+        mock_response_page1.status_code = 200
+        mock_response_page1.json.return_value = [
+            self._make_strava_activity(301, 'First Run', '2025-04-10T09:00:00Z'),
+            self._make_strava_activity(302, 'Second Run', '2025-04-12T09:00:00Z'),
+        ]
+
+        mock_response_page2 = MagicMock()
+        mock_response_page2.status_code = 200
+        mock_response_page2.json.return_value = []
+
+        mock_get.side_effect = [mock_response_page1, mock_response_page2]
+
+        result = StravaSyncService.sync_recent_activities(self.user)
+        self.assertTrue(result)
+
+        # Verify the 'after' param was the user's date_joined epoch
+        first_call_params = mock_get.call_args_list[0]
+        self.assertEqual(first_call_params[1]['params']['after'], self.date_joined_epoch)
+
+        # Both activities should have been created
+        self.assertEqual(Activity.objects.filter(athlete=self.user).count(), 2)
+
+    @patch('apps.activities.services.StravaSyncService.refresh_user_token')
+    @patch('apps.activities.services.requests.get')
+    def test_sync_paginates_through_multiple_pages(self, mock_get, mock_refresh):
+        """
+        Verify that sync loops through all pages until Strava returns an empty list.
+        """
+        mock_refresh.return_value = 'fresh_token'
+
+        # Page 1
+        page1 = MagicMock()
+        page1.status_code = 200
+        page1.json.return_value = [
+            self._make_strava_activity(401, 'Page1 Run1'),
+            self._make_strava_activity(402, 'Page1 Run2'),
+        ]
+
+        # Page 2
+        page2 = MagicMock()
+        page2.status_code = 200
+        page2.json.return_value = [
+            self._make_strava_activity(403, 'Page2 Run1'),
+        ]
+
+        # Page 3 (empty — stops pagination)
+        page3 = MagicMock()
+        page3.status_code = 200
+        page3.json.return_value = []
+
+        mock_get.side_effect = [page1, page2, page3]
+
+        result = StravaSyncService.sync_recent_activities(self.user)
+        self.assertTrue(result)
+
+        # All 3 activities across 2 pages should be created
+        self.assertEqual(Activity.objects.filter(athlete=self.user).count(), 3)
+        # 3 API calls total (page 1, 2, 3)
+        self.assertEqual(mock_get.call_count, 3)
+
+    @patch('apps.activities.services.StravaSyncService.refresh_user_token')
+    @patch('apps.activities.services.requests.get')
+    def test_sync_returns_false_on_strava_api_failure(self, mock_get, mock_refresh):
+        """
+        If Strava API returns a non-200 status, sync should return False.
+        """
+        mock_refresh.return_value = 'fresh_token'
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_get.return_value = mock_response
+
+        result = StravaSyncService.sync_recent_activities(self.user)
+        self.assertFalse(result)
+
+        # No activities should be created
+        self.assertEqual(Activity.objects.filter(athlete=self.user).count(), 0)
+
+    @patch('apps.activities.services.StravaSyncService.refresh_user_token')
+    def test_sync_returns_false_when_token_refresh_fails(self, mock_refresh):
+        """
+        If token refresh fails, sync should return False immediately.
+        """
+        mock_refresh.return_value = None
+
+        result = StravaSyncService.sync_recent_activities(self.user)
+        self.assertFalse(result)
+
+    @patch('apps.activities.services.StravaSyncService.refresh_user_token')
+    @patch('apps.activities.services.requests.get')
+    def test_sync_update_or_create_does_not_duplicate(self, mock_get, mock_refresh):
+        """
+        If a strava_id already exists, it should be updated, not duplicated.
+        """
+        mock_refresh.return_value = 'fresh_token'
+
+        # Pre-existing activity with strava_id=500
+        Activity.objects.create(
+            athlete=self.user, strava_id=500, name='Original Name',
+            distance=1000, moving_time=600, elapsed_time=700,
+            total_elevation_gain=10, type='Run', sport_type='Run',
+            average_speed=2.0, max_speed=3.0,
+            start_date='2025-03-01T08:00:00Z',
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            self._make_strava_activity(500, 'Updated Name', '2025-03-01T08:00:00Z')
+        ]
+
+        mock_empty = MagicMock()
+        mock_empty.status_code = 200
+        mock_empty.json.return_value = []
+
+        mock_get.side_effect = [mock_response, mock_empty]
+
+        result = StravaSyncService.sync_recent_activities(self.user)
+        self.assertTrue(result)
+
+        # Should still be only 1 activity, but with updated name
+        self.assertEqual(Activity.objects.filter(strava_id=500).count(), 1)
+        updated = Activity.objects.get(strava_id=500)
+        self.assertEqual(updated.name, 'Updated Name')
+

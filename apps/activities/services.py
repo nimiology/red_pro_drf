@@ -91,24 +91,52 @@ class StravaSyncService:
             return None
 
     @staticmethod
-    def sync_recent_activities(user, per_page=30):
+    def sync_recent_activities(user, per_page=200):
         """
-        Fetches recent activities for a user from Strava and saves them.
+        Incrementally syncs Strava activities for a user.
+
+        - If the user already has synced activities, fetches only activities
+          after the most recent one's start_date.
+        - If the user has no activities, fetches everything since their
+          account creation date (date_joined).
+        - Paginates through all available pages from the Strava API.
         """
         access_token = StravaSyncService.refresh_user_token(user)
         if not access_token:
             return False
 
+        # Determine the "after" epoch timestamp for incremental sync
+        latest_activity = (
+            Activity.objects.filter(athlete=user)
+            .order_by('-start_date')
+            .first()
+        )
+        if latest_activity:
+            after_epoch = int(latest_activity.start_date.timestamp())
+        else:
+            # No existing activities — sync from account creation
+            after_epoch = int(user.date_joined.timestamp())
+
         url = "https://www.strava.com/api/v3/athlete/activities"
         headers = {'Authorization': f'Bearer {access_token}'}
-        params = {'per_page': per_page}
-        
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code == 200:
+        page = 1
+
+        while True:
+            params = {
+                'after': after_epoch,
+                'per_page': per_page,
+                'page': page,
+            }
+
+            response = requests.get(url, headers=headers, params=params)
+            if response.status_code != 200:
+                return False
+
             activities_data = response.json()
+            if not activities_data:
+                break  # No more pages
+
             for data in activities_data:
-                # We can reuse sync_activity or just save the summary data here.
-                # Since the summary data contains most fields, we'll save it.
                 defaults = {
                     'athlete': user,
                     'name': data.get('name'),
@@ -118,16 +146,26 @@ class StravaSyncService:
                     'moving_time': data.get('moving_time'),
                     'elapsed_time': data.get('elapsed_time'),
                     'total_elevation_gain': data.get('total_elevation_gain'),
-                    'start_date': parse_datetime(data.get('start_date')) if data.get('start_date') else None,
+                    'start_date': (
+                        parse_datetime(data.get('start_date'))
+                        if data.get('start_date') else None
+                    ),
                     'average_speed': data.get('average_speed'),
                     'max_speed': data.get('max_speed'),
                     'has_heartrate': data.get('has_heartrate', False),
                     'average_heartrate': data.get('average_heartrate'),
                     'max_heartrate': data.get('max_heartrate'),
+                    'calories': data.get('calories'),
+                    'elev_high': data.get('elev_high'),
+                    'elev_low': data.get('elev_low'),
+                    'summary_polyline': data.get('map', {}).get('summary_polyline'),
+                    'achievement_count': data.get('achievement_count', 0),
                 }
                 Activity.objects.update_or_create(
                     strava_id=data['id'],
                     defaults=defaults
                 )
-            return True
-        return False
+
+            page += 1
+
+        return True
