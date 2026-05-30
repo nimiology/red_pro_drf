@@ -35,9 +35,13 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         if not user.is_authenticated:
             return User.objects.none()
         
+        if user.role == 'COACH':
+            # Coaches need to see all users (or at least all athletes) to invite them to squads
+            return User.objects.all()
+            
+        # Athletes see themselves, their coach, and other athletes in their squads
         return User.objects.filter(
             Q(id=user.id) | 
-            Q(squads__coach=user) | 
             Q(managed_squads__athletes=user) |
             Q(squads__in=user.squads.all())
         ).distinct()
@@ -114,6 +118,12 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Store the athlete profile blob in Redis (not in the DB).
         set_strava_raw_profile(user.pk, data['athlete'])
+
+        # Fetch recent activities immediately
+        threading.Thread(
+            target=StravaSyncService.sync_recent_activities,
+            args=(user,)
+        ).start()
 
         # Ensure that the Strava webhook subscription is active (run in a background thread)
         threading.Thread(
