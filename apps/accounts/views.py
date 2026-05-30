@@ -35,13 +35,9 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         if not user.is_authenticated:
             return User.objects.none()
         
-        if user.role == 'COACH':
-            # Coaches need to see all users (or at least all athletes) to invite them to squads
-            return User.objects.all()
-            
-        # Athletes see themselves, their coach, and other athletes in their squads
         return User.objects.filter(
             Q(id=user.id) | 
+            Q(squads__coach=user) | 
             Q(managed_squads__athletes=user) |
             Q(squads__in=user.squads.all())
         ).distinct()
