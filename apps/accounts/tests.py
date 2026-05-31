@@ -4,11 +4,6 @@ from django.core.cache import cache
 from rest_framework import status
 from rest_framework.test import APITestCase
 from apps.accounts.models import User
-from apps.accounts.strava_cache import (
-    get_strava_raw_profile,
-    set_strava_raw_profile,
-    delete_strava_raw_profile,
-)
 import datetime
 from unittest.mock import patch, MagicMock
 
@@ -157,6 +152,11 @@ class StravaOAuthTests(APITestCase):
         self.assertEqual(self.user.strava_access_token, 'mock_access')
         self.assertEqual(self.user.strava_refresh_token, 'mock_refresh')
         self.assertIsNotNone(self.user.strava_token_expires_at)
+        self.assertEqual(self.user.strava_raw_profile, {
+            "id": 99999,
+            "firstname": "John",
+            "lastname": "Doe"
+        })
 
         # Verify that ensure_webhook_subscribed was triggered
         mock_subscribe.assert_called_once()
@@ -168,55 +168,38 @@ class StravaOAuthTests(APITestCase):
 # strava_cache helper round-trip tests
 # ---------------------------------------------------------------------------
 @override_settings(CACHES=LOCMEM_CACHE)
-class StravaCacheHelperTests(APITestCase):
-    """Unit tests for get/set/delete_strava_raw_profile helpers."""
+# ---------------------------------------------------------------------------
+# Strava DB Field storage tests
+# ---------------------------------------------------------------------------
+class StravaModelFieldTests(APITestCase):
+    """Unit tests for User.strava_raw_profile database storage."""
 
     def setUp(self):
-        cache.clear()
-        self.user = User.objects.create_user(username='cache_user', password='password123')
+        self.user = User.objects.create_user(username='db_user', password='password123')
         self.profile_data = {
             "id": 99,
             "profile": "https://cdn.strava.com/pic.jpg",
             "profile_medium": "https://cdn.strava.com/pic_m.jpg",
         }
 
-    def tearDown(self):
-        cache.clear()
-
-    def test_set_and_get(self):
-        set_strava_raw_profile(self.user.pk, self.profile_data)
-        result = get_strava_raw_profile(self.user.pk)
-        self.assertEqual(result, self.profile_data)
-
-    def test_get_returns_none_when_empty(self):
-        self.assertIsNone(get_strava_raw_profile(self.user.pk))
-
-    def test_delete(self):
-        set_strava_raw_profile(self.user.pk, self.profile_data)
-        delete_strava_raw_profile(self.user.pk)
-        self.assertIsNone(get_strava_raw_profile(self.user.pk))
-
-    def test_set_invalidates_profile_pic_cache(self):
-        """Setting a new raw profile should clear the derived pic cache."""
-        pic_key = f"profile_pic:{self.user.pk}"
-        cache.set(pic_key, "https://old.com/pic.jpg", timeout=3600)
-        set_strava_raw_profile(self.user.pk, self.profile_data)
-        self.assertIsNone(cache.get(pic_key))
+    def test_set_and_get_db(self):
+        self.user.strava_raw_profile = self.profile_data
+        self.user.save()
+        
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.strava_raw_profile, self.profile_data)
 
 
 # ---------------------------------------------------------------------------
-# ProfilePicURL serializer tests (Redis-backed)
+# ProfilePicURL serializer tests (DB-backed)
 # ---------------------------------------------------------------------------
-@override_settings(CACHES=LOCMEM_CACHE)
 class ProfilePicURLTests(APITestCase):
     """
     Tests for the profile_pic_url serializer field.
-    Raw profile data is now stored in Redis via strava_cache helpers.
+    Raw profile data is stored directly in the user.strava_raw_profile field.
     """
 
     def setUp(self):
-        cache.clear()
-
         self.strava_profile = {
             "id": 12345,
             "firstname": "Jane",
@@ -229,8 +212,8 @@ class ProfilePicURLTests(APITestCase):
             username='strava_user',
             password='password123',
             strava_id='12345',
+            strava_raw_profile=self.strava_profile,
         )
-        set_strava_raw_profile(self.user_with_strava.pk, self.strava_profile)
 
         self.user_no_strava = User.objects.create_user(
             username='no_strava_user',
@@ -241,14 +224,11 @@ class ProfilePicURLTests(APITestCase):
             username='empty_strava_user',
             password='password123',
             strava_id='99999',
+            strava_raw_profile={},
         )
-        set_strava_raw_profile(self.user_empty_strava.pk, {})
-
-    def tearDown(self):
-        cache.clear()
 
     def test_profile_pic_url_with_strava_profile(self):
-        """User with strava raw profile in Redis returns the 'profile' URL."""
+        """User with strava raw profile returns the 'profile' URL."""
         self.client.force_authenticate(user=self.user_with_strava)
         url = reverse('user-me')
         response = self.client.get(url)
@@ -259,7 +239,7 @@ class ProfilePicURLTests(APITestCase):
         )
 
     def test_profile_pic_url_without_strava_profile(self):
-        """User with no raw profile in Redis returns None."""
+        """User with no raw profile returns None."""
         self.client.force_authenticate(user=self.user_no_strava)
         url = reverse('user-me')
         response = self.client.get(url)
@@ -267,7 +247,7 @@ class ProfilePicURLTests(APITestCase):
         self.assertIsNone(response.data['profile_pic_url'])
 
     def test_profile_pic_url_with_empty_strava_profile(self):
-        """User with empty raw profile ({}) in Redis returns None."""
+        """User with empty raw profile ({}) returns None."""
         self.client.force_authenticate(user=self.user_empty_strava)
         url = reverse('user-me')
         response = self.client.get(url)
@@ -276,10 +256,10 @@ class ProfilePicURLTests(APITestCase):
 
     def test_profile_pic_url_falls_back_to_profile_medium(self):
         """When 'profile' key is missing, falls back to 'profile_medium'."""
-        set_strava_raw_profile(self.user_with_strava.pk, {
+        self.user_with_strava.strava_raw_profile = {
             "profile_medium": "https://example.com/medium.jpg",
-        })
-        cache.delete(f"profile_pic:{self.user_with_strava.pk}")
+        }
+        self.user_with_strava.save()
 
         self.client.force_authenticate(user=self.user_with_strava)
         url = reverse('user-me')
@@ -287,48 +267,10 @@ class ProfilePicURLTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['profile_pic_url'], "https://example.com/medium.jpg")
 
-    def test_profile_pic_url_is_cached(self):
-        """Second request should hit cache — changing Redis won't affect result."""
-        self.client.force_authenticate(user=self.user_with_strava)
-        url = reverse('user-me')
-
-        # First request — populates pic cache
-        response1 = self.client.get(url)
-        self.assertEqual(response1.data['profile_pic_url'], self.strava_profile['profile'])
-
-        # Change the Redis value (without using set_strava_raw_profile which
-        # would invalidate the pic cache — simulate raw data change only).
-        cache.set(
-            f"strava_raw_profile:{self.user_with_strava.pk}",
-            {"profile": "https://example.com/new.jpg"},
-        )
-
-        # Second request — should still return the pic-cache value
-        response2 = self.client.get(url)
-        self.assertEqual(response2.data['profile_pic_url'], self.strava_profile['profile'])
-
-    def test_profile_pic_url_cache_expiry_returns_fresh_value(self):
-        """After pic cache is cleared, fresh Redis value is returned."""
-        self.client.force_authenticate(user=self.user_with_strava)
-        url = reverse('user-me')
-
-        # First request
-        response1 = self.client.get(url)
-        self.assertEqual(response1.data['profile_pic_url'], self.strava_profile['profile'])
-
-        # Update Redis and clear pic cache (simulates 3-hour expiry)
-        new_url = "https://example.com/updated.jpg"
-        set_strava_raw_profile(self.user_with_strava.pk, {"profile": new_url})
-
-        # Should now return the new URL
-        response2 = self.client.get(url)
-        self.assertEqual(response2.data['profile_pic_url'], new_url)
-
 
 # ---------------------------------------------------------------------------
 # Matrix smash: profile_pic_url across role × strava state
 # ---------------------------------------------------------------------------
-@override_settings(CACHES=LOCMEM_CACHE)
 class ProfilePicURLMatrixTests(APITestCase):
     """
     Matrix smash: profile_pic_url across all role × strava state combinations.
@@ -346,12 +288,6 @@ class ProfilePicURLMatrixTests(APITestCase):
         'none': None,
     }
 
-    def setUp(self):
-        cache.clear()
-
-    def tearDown(self):
-        cache.clear()
-
     def test_role_strava_state_matrix(self):
         """Every combination of role × strava state returns expected pic URL."""
         roles = [User.Role.ATHLETE, User.Role.COACH, User.Role.NONE]
@@ -367,15 +303,13 @@ class ProfilePicURLMatrixTests(APITestCase):
 
         for role in roles:
             for state_name, strava_data in self.STRAVA_STATES.items():
-                cache.clear()
                 user = User.objects.create_user(
                     username=f'u_{role}_{state_name}',
                     password='password',
                     role=role,
                     strava_id=f'sid_{role}_{state_name}' if strava_data is not None else None,
+                    strava_raw_profile=strava_data,
                 )
-                if strava_data is not None:
-                    set_strava_raw_profile(user.pk, strava_data)
 
                 self.client.force_authenticate(user=user)
                 response = self.client.get(url)
@@ -392,15 +326,13 @@ class ProfilePicURLMatrixTests(APITestCase):
 from unittest.mock import patch, MagicMock
 
 
-@override_settings(CACHES=LOCMEM_CACHE)
 class ProfilePicAPIFallbackTests(APITestCase):
     """
-    When Redis has no raw profile AND the user has a strava_id,
+    When DB has no raw profile AND the user has a strava_id,
     the serializer should fall back to the Strava API to re-fetch the profile.
     """
 
     def setUp(self):
-        cache.clear()
         self.user = User.objects.create_user(
             username='fallback_user',
             password='password123',
@@ -409,13 +341,10 @@ class ProfilePicAPIFallbackTests(APITestCase):
             strava_refresh_token='ref_abc',
         )
 
-    def tearDown(self):
-        cache.clear()
-
     @patch('apps.accounts.serializers.requests.get')
     @patch('apps.activities.services.StravaSyncService.refresh_user_token')
     def test_fallback_fetches_from_strava_api(self, mock_refresh, mock_get):
-        """When Redis is empty, serializer re-fetches from Strava API."""
+        """When DB is empty, serializer re-fetches from Strava API."""
         mock_refresh.return_value = 'fresh_token'
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -431,9 +360,9 @@ class ProfilePicAPIFallbackTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['profile_pic_url'], "https://cdn.strava.com/fetched.jpg")
 
-        # Verify the profile was persisted in Redis for future requests.
-        raw = get_strava_raw_profile(self.user.pk)
-        self.assertEqual(raw['profile'], "https://cdn.strava.com/fetched.jpg")
+        # Verify the profile was persisted in DB for future requests.
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.strava_raw_profile['profile'], "https://cdn.strava.com/fetched.jpg")
 
     @patch('apps.accounts.serializers.requests.get')
     @patch('apps.activities.services.StravaSyncService.refresh_user_token')
@@ -490,13 +419,14 @@ class UserViewSetPermissionsMatrixTests(APITestCase):
         self.unrelated = User.objects.create_user(username='unrelated', role=User.Role.NONE)
 
     def test_user_list_and_retrieve_permissions(self):
-        # Format: (requesting_user, expected_visible_users)
+        # Broadened User queryset: any authenticated user is allowed to see all users
+        all_users = {self.coach1, self.athlete1, self.athlete2, self.coach2, self.athlete3, self.unrelated}
         matrix = [
-            (self.coach1, {self.coach1, self.athlete1, self.athlete2}),
-            (self.athlete1, {self.athlete1, self.athlete2, self.coach1}),
-            (self.coach2, {self.coach2, self.athlete3}),
-            (self.athlete3, {self.athlete3, self.coach2}),
-            (self.unrelated, {self.unrelated}),
+            (self.coach1, all_users),
+            (self.athlete1, all_users),
+            (self.coach2, all_users),
+            (self.athlete3, all_users),
+            (self.unrelated, all_users),
         ]
         
         list_url = reverse('user-list')
@@ -508,14 +438,12 @@ class UserViewSetPermissionsMatrixTests(APITestCase):
             response = self.client.get(list_url)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             # Depending on pagination, response.data might be a dict with 'results' or a list.
-            # Assuming no pagination by default or if there is, we check results.
             data = response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
             visible_ids = {u['id'] for u in data}
             expected_ids = {u.id for u in expected_visible}
             self.assertEqual(visible_ids, expected_ids, f"List failed for {user.username}")
             
             # Test Retrieve
-            all_users = [self.coach1, self.athlete1, self.athlete2, self.coach2, self.athlete3, self.unrelated]
             for target_user in all_users:
                 detail_url = reverse('user-detail', kwargs={'pk': target_user.pk})
                 response = self.client.get(detail_url)

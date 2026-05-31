@@ -1,10 +1,8 @@
 from rest_framework import serializers
-from django.core.cache import cache
 import requests
 
 from apps.activities.services import StravaSyncService
 from .models import User
-from .strava_cache import get_strava_raw_profile, set_strava_raw_profile
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -20,11 +18,13 @@ class UserSerializer(serializers.ModelSerializer):
             'strava_id', 'strava_access_token', 'strava_refresh_token',
             'strava_token_expires_at',
             'profile_pic_url',
+            'strava_raw_profile',
         ]
         read_only_fields = [
             'id', 'username', 'strava_id', 'strava_access_token',
             'strava_refresh_token', 'strava_token_expires_at',
             'profile_pic_url',
+            'strava_raw_profile',
         ]
 
     def get_age(self, obj):
@@ -37,13 +37,11 @@ class UserSerializer(serializers.ModelSerializer):
     def _fetch_strava_profile_from_api(self, user):
         """
         Fallback: re-fetch the athlete profile from the Strava API
-        using the stored access token, then persist in Redis.
+        using the stored access token, then persist in the database.
         Returns the profile dict or None.
         """
         if not user.strava_access_token:
             return None
-
-
 
         access_token = StravaSyncService.refresh_user_token(user)
         if not access_token:
@@ -55,20 +53,17 @@ class UserSerializer(serializers.ModelSerializer):
         )
         if response.status_code == 200:
             profile_data = response.json()
-            set_strava_raw_profile(user.pk, profile_data)
+            user.strava_raw_profile = profile_data
+            user.save(update_fields=['strava_raw_profile'])
             return profile_data
         return None
 
     def get_profile_pic_url(self, obj):
-        cache_key = f"profile_pic:{obj.pk}"
-        url = cache.get(cache_key)
-        if url is None:
-            raw = get_strava_raw_profile(obj.pk)
-            # Fallback: if Redis is empty, re-fetch from Strava API
-            if raw is None and obj.strava_id:
-                raw = self._fetch_strava_profile_from_api(obj)
-            raw = raw or {}
-            url = raw.get("profile") or raw.get("profile_medium") or ""
-            cache.set(cache_key, url, timeout=3 * 60 * 60)  # 3 hours
+        raw = obj.strava_raw_profile
+        # Fallback: if DB is empty, re-fetch from Strava API
+        if raw is None and obj.strava_id:
+            raw = self._fetch_strava_profile_from_api(obj)
+        raw = raw or {}
+        url = raw.get("profile") or raw.get("profile_medium") or ""
         return url or None
 

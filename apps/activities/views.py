@@ -18,7 +18,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 import requests as http_requests
 from apps.accounts.models import User
-from apps.accounts.strava_cache import set_strava_raw_profile
 from django.db.models import Q
 
 class ActivityViewSet(viewsets.ModelViewSet):
@@ -110,7 +109,7 @@ class StravaWebhookView(View):
     @staticmethod
     def _refresh_athlete_profile(strava_athlete_id):
         """
-        Re-fetch the athlete profile from Strava and store in Redis.
+        Re-fetch the athlete profile from Strava and store in the database.
         Called when a Strava 'athlete.update' webhook is received.
         """
 
@@ -129,4 +128,5 @@ class StravaWebhookView(View):
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if response.status_code == 200:
-            set_strava_raw_profile(user.pk, response.json())
+            user.strava_raw_profile = response.json()
+            user.save(update_fields=['strava_raw_profile'])

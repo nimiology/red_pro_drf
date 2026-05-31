@@ -5,7 +5,6 @@ from rest_framework.views import APIView
 import requests
 from .models import User
 from .serializers import UserSerializer
-from .strava_cache import set_strava_raw_profile
 from django.conf import settings
 from django.utils.timezone import now
 from datetime import timedelta
@@ -105,10 +104,8 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         user.strava_refresh_token = data['refresh_token']
    
         user.strava_token_expires_at = now() + timedelta(seconds=data['expires_in'])
+        user.strava_raw_profile = data['athlete']
         user.save()
-
-        # Store the athlete profile blob in Redis (not in the DB).
-        set_strava_raw_profile(user.pk, data['athlete'])
 
         # Fetch recent activities immediately
         threading.Thread(
