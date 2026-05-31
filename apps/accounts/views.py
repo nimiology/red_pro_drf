@@ -35,12 +35,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         if not user.is_authenticated:
             return User.objects.none()
         
-        return User.objects.filter(
-            Q(id=user.id) | 
-            Q(squads__coach=user) | 
-            Q(managed_squads__athletes=user) |
-            Q(squads__in=user.squads.all())
-        ).distinct()
+        return User.objects.all()
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def strava_auth_url(self, request):
