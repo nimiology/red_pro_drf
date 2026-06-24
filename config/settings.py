@@ -188,7 +188,7 @@ LOGGING = {
     },
     'root': {
         'handlers': ['console'],
-        'level': 'WARNING',
+        'level': 'INFO',
     },
     'loggers': {
         'django': {
@@ -198,7 +198,12 @@ LOGGING = {
         },
         'django.request': {
             'handlers': ['console'],
-            'level': 'ERROR',
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
             'propagate': False,
         },
     },

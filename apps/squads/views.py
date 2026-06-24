@@ -38,10 +38,12 @@ class SquadViewSet(viewsets.ModelViewSet):
         Returns the ranked leaderboard for this squad.
         Query params:
             period — 'weekly' (default), 'monthly', or 'all_time'
+            sort_by — 'distance' (default), or 'pace'
         """
         squad = self.get_object()
         period = request.query_params.get('period', 'weekly')
-        data = LeaderboardService.get_squad_leaderboard(squad, period)
+        sort_by = request.query_params.get('sort_by', 'distance')
+        data = LeaderboardService.get_squad_leaderboard(squad, period=period, sort_by=sort_by)
         serializer = LeaderboardEntrySerializer(data, many=True)
         return Response(serializer.data)
 

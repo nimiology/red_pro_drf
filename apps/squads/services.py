@@ -35,13 +35,13 @@ class LeaderboardService:
         return timezone.now() - timedelta(days=days)
 
     @classmethod
-    def get_squad_leaderboard(cls, squad, period='weekly'):
+    def get_squad_leaderboard(cls, squad, period='weekly', sort_by='distance'):
         """
-        Returns a list of dicts, one per athlete, sorted by score descending.
+        Returns a list of dicts, one per athlete, sorted by distance or pace.
 
         Each dict contains:
             rank, athlete_id, athlete_username, athlete_full_name,
-            total_distance_km, total_moving_time_hours, total_elevation_m,
+            total_distance_km, total_moving_time_hours, average_pace, total_elevation_m,
             completed_missions, score
         """
         if period not in cls.VALID_PERIODS:
@@ -68,6 +68,11 @@ class LeaderboardService:
             total_moving_time_hours = agg['total_moving_time'] / 3600.0  # seconds → hours
             total_elevation_m = agg['total_elevation']
 
+            average_pace = 0.0
+            if total_distance_km > 0:
+                average_pace = (total_moving_time_hours * 60) / total_distance_km
+
+
             # --- Mission completion count ---
             mission_filter = Q(
                 Q(athlete=athlete) | Q(squad=squad, squad__athletes=athlete),
@@ -92,13 +97,20 @@ class LeaderboardService:
                 'athlete_full_name': athlete.full_name or athlete.username,
                 'total_distance_km': round(total_distance_km, 2),
                 'total_moving_time_hours': round(total_moving_time_hours, 2),
+                'average_pace': round(average_pace, 2),
                 'total_elevation_m': round(total_elevation_m, 2),
                 'completed_missions': completed_missions,
                 'score': round(score, 2),
             })
 
-        # Sort by score descending
-        leaderboard.sort(key=lambda x: x['score'], reverse=True)
+        # Sort based on sort_by
+        if sort_by == 'pace':
+            # For pace, lower is better (faster), but 0 means no distance so it should be last
+            leaderboard.sort(key=lambda x: x['average_pace'] if x['average_pace'] > 0 else float('inf'))
+        else:
+            # Default sort by distance (descending)
+            leaderboard.sort(key=lambda x: x['total_distance_km'], reverse=True)
+
 
         # Assign ranks
         for idx, entry in enumerate(leaderboard, start=1):
