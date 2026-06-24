@@ -73,7 +73,8 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
                 "client_id": settings.STRAVA_CLIENT_ID,
                 "client_secret": settings.STRAVA_CLIENT_SECRET,
                 "code": code,
-                "grant_type": "authorization_code"
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.STRAVA_REDIRECT_URI,
             }
         )
 
@@ -81,10 +82,11 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
             err_msg = "Failed to exchange authorization code for access tokens. Please try again."
             try:
                 err_data = response.json()
+                print("STRAVA TOKEN EXCHANGE ERROR:", err_data)
                 if 'message' in err_data:
                     err_msg = err_data['message']
-            except Exception:
-                pass
+            except Exception as e:
+                print("STRAVA TOKEN EXCHANGE EXCEPTION:", e)
             return render_strava_status_page(request, success=False, error_message=err_msg)
 
         data = response.json()
