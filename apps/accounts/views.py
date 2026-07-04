@@ -83,6 +83,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
             try:
                 err_data = response.json()
                 print("STRAVA TOKEN EXCHANGE ERROR:", err_data)
+                print(f"DEBUG: client_id length: {len(str(settings.STRAVA_CLIENT_ID))}, secret length: {len(str(settings.STRAVA_CLIENT_SECRET))}")
                 if 'message' in err_data:
                     err_msg = err_data['message']
             except Exception as e:

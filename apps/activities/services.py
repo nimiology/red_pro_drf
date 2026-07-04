@@ -3,8 +3,12 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from datetime import timedelta
+import logging
+
 from .models import Activity
 from apps.accounts.models import User
+
+logger = logging.getLogger(__name__)
 
 class StravaSyncService:
     @staticmethod
@@ -103,6 +107,7 @@ class StravaSyncService:
         """
         access_token = StravaSyncService.refresh_user_token(user)
         if not access_token:
+            logger.error(f"Strava sync failed for user {user.username}: Could not refresh token.")
             return False
 
         # Determine the "after" epoch timestamp for incremental sync
@@ -130,6 +135,7 @@ class StravaSyncService:
 
             response = requests.get(url, headers=headers, params=params)
             if response.status_code != 200:
+                logger.error(f"Strava API error during sync for user {user.username}: HTTP {response.status_code} - {response.text}")
                 return False
 
             activities_data = response.json()
@@ -139,32 +145,38 @@ class StravaSyncService:
             for data in activities_data:
                 defaults = {
                     'athlete': user,
-                    'name': data.get('name'),
-                    'type': data.get('type'),
-                    'sport_type': data.get('sport_type'),
-                    'distance': data.get('distance'),
-                    'moving_time': data.get('moving_time'),
-                    'elapsed_time': data.get('elapsed_time'),
-                    'total_elevation_gain': data.get('total_elevation_gain'),
+                    'name': data.get('name') or '',
+                    'type': data.get('type') or '',
+                    'sport_type': data.get('sport_type') or '',
+                    'distance': data.get('distance') if data.get('distance') is not None else 0.0,
+                    'moving_time': data.get('moving_time') if data.get('moving_time') is not None else 0,
+                    'elapsed_time': data.get('elapsed_time') if data.get('elapsed_time') is not None else 0,
+                    'total_elevation_gain': data.get('total_elevation_gain') if data.get('total_elevation_gain') is not None else 0.0,
                     'start_date': (
                         parse_datetime(data.get('start_date'))
                         if data.get('start_date') else None
                     ),
-                    'average_speed': data.get('average_speed'),
-                    'max_speed': data.get('max_speed'),
-                    'has_heartrate': data.get('has_heartrate', False),
+                    'average_speed': data.get('average_speed') if data.get('average_speed') is not None else 0.0,
+                    'max_speed': data.get('max_speed') if data.get('max_speed') is not None else 0.0,
+                    'has_heartrate': bool(data.get('has_heartrate')),
                     'average_heartrate': data.get('average_heartrate'),
                     'max_heartrate': data.get('max_heartrate'),
                     'calories': data.get('calories'),
                     'elev_high': data.get('elev_high'),
                     'elev_low': data.get('elev_low'),
                     'summary_polyline': data.get('map', {}).get('summary_polyline'),
-                    'achievement_count': data.get('achievement_count', 0),
+                    'achievement_count': data.get('achievement_count') if data.get('achievement_count') is not None else 0,
                 }
-                Activity.objects.update_or_create(
-                    strava_id=data['id'],
-                    defaults=defaults
-                )
+                
+                try:
+                    Activity.objects.update_or_create(
+                        strava_id=data['id'],
+                        defaults=defaults
+                    )
+                except Exception as e:
+                    logger.error(f"Error saving activity {data.get('id')} for user {user.username}: {str(e)}")
+                    # Continue syncing other activities even if one fails
+                    continue
 
             page += 1
 
