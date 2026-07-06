@@ -452,3 +452,49 @@ class UserViewSetPermissionsMatrixTests(APITestCase):
                 else:
                     self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, f"Retrieve should fail for {user.username} accessing {target_user.username}")
 
+
+@override_settings(CACHES=LOCMEM_CACHE)
+class CaseInsensitiveUsernameTests(APITestCase):
+    def test_case_insensitive_registration(self):
+        # Using djoser registration endpoint
+        url = '/auth/users/'
+        data = {
+            'username': 'TestUser@EMAIL.com',
+            'password': 'ComplexP@ssw0rd!',
+            'email': 'testuser@email.com'
+        }
+        response = self.client.post(url, data)
+        if response.status_code != 201:
+            print(f"DEBUG case_insensitive_registration: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        # Verify it was saved as lowercase
+        user = User.objects.get(id=response.data['id'])
+        self.assertEqual(user.username, 'testuser@email.com')
+
+    def test_case_insensitive_login(self):
+        # Create user directly (which lowercases username due to overridden save)
+        User.objects.create_user(username='TestLoginUser', password='ComplexP@ssw0rd!')
+        
+        url = '/auth/jwt/create/'
+        # Try login with uppercase version (which is different from saved lowercase 'testloginuser')
+        data = {
+            'username': 'TestLoginUser',
+            'password': 'ComplexP@ssw0rd!'
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
+    def test_special_characters_username(self):
+        url = '/auth/users/'
+        data = {
+            'username': 'crazy@#$username!',
+            'password': 'ComplexP@ssw0rd!',
+        }
+        response = self.client.post(url, data)
+        if response.status_code != 201:
+            print(f"DEBUG special_characters_username: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['username'], 'crazy@#$username!')
+

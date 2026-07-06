@@ -148,6 +148,10 @@ DJOSER = {
 
 AUTH_USER_MODEL = 'accounts.User'
 
+AUTHENTICATION_BACKENDS = [
+    'apps.accounts.backends.CaseInsensitiveModelBackend',
+]
+
 INTERNAL_IPS = config('INTERNAL_IPS', default='127.0.0.1', cast=Csv())
 
 CORS_ALLOW_ALL_ORIGINS = True

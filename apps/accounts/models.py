@@ -1,13 +1,37 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
+from django.core.validators import RegexValidator
+
+class CustomUsernameValidator(RegexValidator):
+    regex = r'^[^\s]+$'
+    message = _('Enter a valid username. This value may not contain spaces.')
 
 class User(AbstractUser):
+    username_validator = CustomUsernameValidator()
+
+    username = models.CharField(
+        _('username'),
+        max_length=150,
+        unique=True,
+        help_text=_('Required. 150 characters or fewer. No spaces allowed.'),
+        validators=[username_validator],
+        error_messages={
+            'unique': _("A user with that username already exists."),
+        },
+    )
+
     class Role(models.TextChoices):
         COACH = 'COACH', _('Coach')
         ATHLETE = 'ATHLETE', _('Athlete')
         NONE = 'NONE', _('None')
 
+    def save(self, *args, **kwargs):
+        if self.username:
+            self.username = self.username.lower()
+        if self.email:
+            self.email = self.email.lower()
+        super().save(*args, **kwargs)
 
     # Onboarding Variables
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.NONE)
