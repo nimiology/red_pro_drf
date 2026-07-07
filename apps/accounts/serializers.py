@@ -21,7 +21,7 @@ class UserSerializer(serializers.ModelSerializer):
             'strava_raw_profile',
         ]
         read_only_fields = [
-            'id', 'username', 'strava_id', 'strava_access_token',
+            'id', 'username', 'role', 'strava_id', 'strava_access_token',
             'strava_refresh_token', 'strava_token_expires_at',
             'profile_pic_url',
             'strava_raw_profile',

@@ -498,3 +498,127 @@ class CaseInsensitiveUsernameTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['username'], 'crazy@#$username!')
 
+
+# ---------------------------------------------------------------------------
+# Role restriction tests — role is read-only, defaults to ATHLETE
+# ---------------------------------------------------------------------------
+@override_settings(CACHES=LOCMEM_CACHE)
+class RoleRestrictionTests(APITestCase):
+    """
+    Tests that role cannot be set or changed via API.
+    Coaches can only be created/promoted via Django admin.
+    """
+
+    def test_new_user_defaults_to_athlete(self):
+        """Users registered via API should default to ATHLETE role."""
+        url = '/auth/users/'
+        data = {
+            'username': 'new_athlete',
+            'password': 'ComplexP@ssw0rd!',
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        user = User.objects.get(username='new_athlete')
+        self.assertEqual(user.role, User.Role.ATHLETE)
+
+    def test_registration_ignores_role_coach(self):
+        """Attempting to register with role=COACH should be ignored; user gets ATHLETE."""
+        url = '/auth/users/'
+        data = {
+            'username': 'wannabe_coach',
+            'password': 'ComplexP@ssw0rd!',
+            'role': 'COACH',
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        user = User.objects.get(username='wannabe_coach')
+        self.assertEqual(user.role, User.Role.ATHLETE)
+
+    def test_registration_ignores_role_none(self):
+        """Attempting to register with role=NONE should be ignored; user gets ATHLETE."""
+        url = '/auth/users/'
+        data = {
+            'username': 'none_role_user',
+            'password': 'ComplexP@ssw0rd!',
+            'role': 'NONE',
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        user = User.objects.get(username='none_role_user')
+        self.assertEqual(user.role, User.Role.ATHLETE)
+
+    def test_patch_me_cannot_change_role_to_coach(self):
+        """PATCH /auth/users/me/ should not allow changing role to COACH."""
+        athlete = User.objects.create_user(
+            username='locked_athlete', password='password123', role=User.Role.ATHLETE
+        )
+        self.client.force_authenticate(user=athlete)
+        url = reverse('user-me')
+
+        response = self.client.patch(url, {'role': 'COACH'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        athlete.refresh_from_db()
+        self.assertEqual(athlete.role, User.Role.ATHLETE)
+
+    def test_patch_me_cannot_change_role_to_none(self):
+        """PATCH /auth/users/me/ should not allow changing role to NONE."""
+        athlete = User.objects.create_user(
+            username='athlete_stays', password='password123', role=User.Role.ATHLETE
+        )
+        self.client.force_authenticate(user=athlete)
+        url = reverse('user-me')
+
+        response = self.client.patch(url, {'role': 'NONE'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        athlete.refresh_from_db()
+        self.assertEqual(athlete.role, User.Role.ATHLETE)
+
+    def test_admin_created_coach_can_login(self):
+        """Coach created via admin (direct model) can log in and access endpoints."""
+        coach = User.objects.create_user(
+            username='admin_coach', password='CoachP@ss123!', role=User.Role.COACH
+        )
+        # Login via JWT
+        url = '/auth/jwt/create/'
+        response = self.client.post(url, {
+            'username': 'admin_coach',
+            'password': 'CoachP@ss123!',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
+        # Verify profile shows COACH role
+        self.client.force_authenticate(user=coach)
+        me_url = reverse('user-me')
+        response = self.client.get(me_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['role'], User.Role.COACH)
+
+    def test_role_readonly_matrix(self):
+        """Matrix: all role transitions via PATCH should be ignored."""
+        roles = [User.Role.ATHLETE, User.Role.COACH, User.Role.NONE]
+        target_roles = ['ATHLETE', 'COACH', 'NONE']
+        url = reverse('user-me')
+
+        for original_role in roles:
+            for target_role in target_roles:
+                user = User.objects.create_user(
+                    username=f'matrix_{original_role}_{target_role}',
+                    password='password123',
+                    role=original_role,
+                )
+                self.client.force_authenticate(user=user)
+                response = self.client.patch(url, {'role': target_role})
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+                user.refresh_from_db()
+                self.assertEqual(
+                    user.role, original_role,
+                    msg=f"Role changed from {original_role} to {user.role} "
+                        f"when trying to set {target_role}"
+                )

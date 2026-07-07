@@ -34,7 +34,7 @@ class User(AbstractUser):
         super().save(*args, **kwargs)
 
     # Onboarding Variables
-    role = models.CharField(max_length=10, choices=Role.choices, default=Role.NONE)
+    role = models.CharField(max_length=10, choices=Role.choices, default=Role.ATHLETE)
     onboarding_step = models.PositiveSmallIntegerField(default=1)
     is_onboarding_finished = models.BooleanField(default=False)
     
